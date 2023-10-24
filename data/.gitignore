@@ -1,0 +1,17 @@
+/ACNE/images
+/ACNE/annotations
+
+.DS_STORE
+*.rar
+*.zip
+*.tar.gz
+*.npy
+*.pkl
+*.pth
+
+*.PNG
+*.png
+*.JPG
+*.jpg
+
+*.json
