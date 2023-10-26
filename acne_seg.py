@@ -43,7 +43,7 @@ _device = torch.device('cpu')
 ###################################################################
 parser = argparse.ArgumentParser(description='Train Mask R-CNN on ACNE')
 parser.add_argument('command', metavar='<command>',
-                    help='"train" or "evaluate" on ACNE')
+                    help='"train" or "test" on ACNE')
 parser.add_argument('--running_info', required=False,
                     default=RUNNING_INFO_DIR,
                     metavar='/path/to/save/running/info',
@@ -168,7 +168,7 @@ def train(model, train_loader, valid_loader, layers, learning_rate, epochs, conf
         # Save model
         if epoch % config.SAVE_INTERVAL == 0:
             torch.save(model.state_dict(), os.path.join(
-                MODAL_SAVE_DIR, f'{layers}_epoch_{epoch:03d}.pth'))
+                MODAL_SAVE_DIR, f'{config.BACKBONE_ARCH}_{layers}_epoch_{epoch:03d}.pth'))
 
 
 def train_epoch(model, dataloader, optimizer):

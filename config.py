@@ -48,7 +48,7 @@ class Config(object):
 
     # Number of classification classes (including background)
     NUM_CLASSES = 11
-    BACKBONE_ARCH = 'resnet50'
+    BACKBONE_ARCH = 'resnet101'
     BACKBONE_INIT_WEIGHT = 'DEFAULT'  # ['DEFAULT', 'IMAGENET1K_V1', 'IMAGENET1K_V2']
     # The strides of each layer of the FPN Pyramid. These values
     # are based on a Resnet101 backbone.
