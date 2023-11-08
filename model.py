@@ -648,11 +648,6 @@ class MaskRCNN(nn.Module):
             gt_bboxes = inputs[2]
             gt_masks = inputs[3]
 
-            # Normalize coordinates
-            h, w = self.config.IMAGE_SHAPE[:2]
-            scale = torch.tensor(np.array([w, h, w, h])).float().to(gt_bboxes.device)
-            gt_bboxes = gt_bboxes / scale
-
             # Generate detection targets
             # Subsamples proposals and generates target outputs for training
             proposals, target_class_ids, target_deltas, target_masks = \

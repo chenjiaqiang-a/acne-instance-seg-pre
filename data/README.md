@@ -7,19 +7,31 @@
 - rgb_std = [0.30621628 0.24620538 0.22664634]
 #### 标注参数
 运行`summarize.py`获取标注信息
+- min_area = 51.25
+- min_width = 5.9
+- min_height = 6.7
 ## 拆分数据集
-运行`split_data.py`将数据集拆分为训练集、验证集、测试集。
-
-运行后将在`ACNE`内生成`train_list.txt`、`valid_list.txt`、`test_list.txt`三个文件。
+运行`split_data.py`将数据集拆分为训练集、验证集、测试集
 
 |split|count|
 |-|-|
-|train|177|
-|valid|44|
+|train|199|
+|valid|22|
 |test|55|
 ## 构造COCO格式的annotation
 运行`generate_coco_ann`生成COCO格式的annotation（*在构造COCO格式的annotation前，请先拆分数据集*）
 
 运行后将在`annotations`文件夹内生成`acne_train.json`、`acne_valid.json`、`acne_test.json`三个文件
 ## ACNE_seg数据集
-提供经过清理后的ACNE_seg数据集、仅包含经过标注的数据，且标签为COCO格式
+为方便实验，请拆分数据并构造COCO格式的annotation，并按照下面的文件结构，组织数据，形成ACNE_seg数据集。
+```text
+/ACNE_seg
++---annotations
+|   +---acne_train.json
+|   +---acne_valid.json
+|   \---acne_test.json
++---images
++---valid_patch
+\---test_patch
+```
+提供经过清理后的ACNE_seg数据集仅包含经过标注的数据，且标签为COCO格式

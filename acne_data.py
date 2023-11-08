@@ -14,15 +14,15 @@ from config import Config
 
 
 class AcneSegDataset(Dataset):
-    def __init__(self, base_dir: str, mode: str, config: Config, transforms=None):
+    def __init__(self, img_dir: str, ann_file: str, mode: str, config: Config, transforms=None):
         super(AcneSegDataset, self).__init__()
-        self.img_dir = os.path.join(base_dir, 'images')
+        self.img_dir = img_dir
         self.config = config
         assert mode in ['train', 'valid', 'test']
         self.mode = mode
         self.transforms = transforms
 
-        self.coco = COCO(os.path.join(base_dir, 'annotations', f'acne_{mode}.json'))
+        self.coco = COCO(ann_file)
         self.img_ids = self.coco.getImgIds()
 
         # Anchors
@@ -38,8 +38,8 @@ class AcneSegDataset(Dataset):
         img_obj = self.coco.imgs[img_id]
         ann_objs = self.coco.imgToAnns[img_id]
 
-        image, image_meta, gt_class_ids, gt_bboxes, gt_masks = \
-            _load_image_gt(img_id, os.path.join(self.img_dir, img_obj['file_name']),
+        image, gt_class_ids, gt_bboxes, gt_masks = \
+            _load_image_gt(os.path.join(self.img_dir, img_obj['file_name']),
                            ann_objs, self.mode, self.config)
 
         if self.transforms is not None:
@@ -47,9 +47,8 @@ class AcneSegDataset(Dataset):
             image, gt_bboxes, gt_masks = result['image'], result['bboxes'], result['masks']
 
         if self.mode == 'test':
-            image_patches = torch.tensor(image.transpose((0, 3, 1, 2)).copy()).float()  # float32 [patches, 3, H, W]
-            image_metas = torch.tensor(image_meta).int()  # int32 [patches, 8]
-            return image_patches, image_metas
+            image = torch.tensor(image.transpose((2, 0, 1)).copy()).float()  # float32 [3, H, W]
+            return image, img_id
 
         # RPN Targets
         rpn_matches, rpn_deltas = build_rpn_targets(self.anchors, gt_bboxes, self.config)
@@ -72,37 +71,24 @@ class AcneSegDataset(Dataset):
 
         # Convert to tensor
         image = torch.tensor(image.transpose((2, 0, 1)).copy()).float()  # float32 [3, H, W]
-        image_meta = torch.tensor(image_meta).int()  # int32 [8]
         rpn_matches = rpn_matches.int()  # int32 [num_anchors]
         rpn_deltas = rpn_deltas.float()  # float32 [rpn_per_image, (dx, dy, dw, dh)]
         gt_class_ids = torch.tensor(gt_class_ids).int()  # int32 [N]
         gt_bboxes = torch.tensor(gt_bboxes).float()  # float32 [N, (x1, x2, y1, y2)]
         gt_masks = torch.tensor(gt_masks.transpose((2, 0, 1)).copy()).float()  # float32 [N, m_H, m_W]
 
-        return image, image_meta, rpn_matches, rpn_deltas, gt_class_ids, gt_bboxes, gt_masks
+        return image, rpn_matches, rpn_deltas, gt_class_ids, gt_bboxes, gt_masks
 
     def __len__(self):
         return len(self.img_ids)
 
 
-def _load_image_gt(img_id, img_path, ann_objs, mode, config: Config):
+def _load_image_gt(img_path, ann_objs, mode, config: Config):
     # Read image
     image = skimage.io.imread(img_path)
 
     if mode == 'test':
-        win_gen = utils.WindowGenerator(image.shape[0], image.shape[1],
-                                        config.INFER_WINDOW_SIZE[0], config.INFER_WINDOW_SIZE[1],
-                                        config.INFER_WINDOW_STRIDES[0], config.INFER_WINDOW_STRIDES[1])
-        patches = []
-        windows = []
-        for h_slice, w_slice in win_gen:
-            patches.append(image[h_slice, w_slice])
-            windows.append([w_slice.start, h_slice.start, w_slice.stop, h_slice.stop])
-
-        image_metas = np.stack([compose_image_meta(img_id, image.shape, window)
-                                for window in windows], axis=0)
-        image_patches = np.stack(patches, axis=0)
-        return image_patches, image_metas, None, None, None
+        return image, None, None, None
 
     # Read annotation
     class_ids = np.zeros((len(ann_objs),), dtype=np.int64)
@@ -119,7 +105,7 @@ def _load_image_gt(img_id, img_path, ann_objs, mode, config: Config):
 
         if config.USE_MINI_MASK:
             b_w, b_h = bbox[2:]
-            seg = np.array(ann['segmentation'])
+            seg = np.array(ann['segmentation'], dtype=np.float64)
             seg[0, 0::2] -= bbox[0]
             seg[0, 1::2] -= bbox[1]
             mask = seg_to_mask(seg.tolist(), b_h, b_w)
@@ -128,39 +114,21 @@ def _load_image_gt(img_id, img_path, ann_objs, mode, config: Config):
             mask = seg_to_mask(ann['segmentation'], image.shape[0], image.shape[1])
         masks[:, :, i] = np.where(mask >= 0.5, 1.0, 0.0)
 
-    # Random crop
-    image, class_ids, bboxes, masks, shape, window = random_crop(
-        [image, class_ids, bboxes, masks], config.IMAGE_SHAPE[:2], config.USE_MINI_MASK)
+    if mode == 'train':
+        # Random crop
+        image, class_ids, bboxes, masks = random_crop(
+            [image, class_ids, bboxes, masks],
+            config.IMAGE_SHAPE[:2],
+            config.BBOX_MIN_AREA,
+            config.BBOX_MIN_HEIGHT,
+            config.BBOX_MIN_WIDTH,
+            config.USE_MINI_MASK)
 
-    image_meta = compose_image_meta(img_id, shape, window)
-    return image, image_meta, class_ids, bboxes, masks
+    # Normalize bboxes
+    bboxes[:, [0, 2]] /= image.shape[1]
+    bboxes[:, [1, 3]] /= image.shape[0]
 
-
-def compose_image_meta(image_id, image_shape, window):
-    """Takes attributes of an image and puts them in one 1D array. Use
-    parse_image_meta() to parse the values back.
-
-    image_id: An int ID of the image. Useful for debugging.
-    image_shape: [height, width, channels]
-    window: (x1, y1, x2, y2) in pixels. The area of the image where the real
-            patch is.
-    """
-    meta = np.array(
-        [image_id] +  # size=1
-        list(image_shape) +  # size=3
-        list(window)  # size=4 (x1, y1, x2, y2) in image cooredinates
-    )
-    return meta
-
-
-def parse_image_metas(metas):
-    """Parses an image info Numpy array to its components.
-    See compose_image_meta() for more details.
-    """
-    image_ids = metas[:, 0]
-    image_shapes = metas[:, 1:4]
-    windows = metas[:, 4:]  # (x1, y1, x2, y2) window of image in in pixels
-    return image_ids, image_shapes, windows
+    return image, class_ids, bboxes, masks
 
 
 def seg_to_mask(seg, height, width):
@@ -179,40 +147,38 @@ def expand_mask(bbox, mini_mask, image_shape):
     return mask
 
 
-def random_crop(inputs, crop_size, ignore_mask):
+def random_crop(inputs, crop_size, bbox_min_area=0, bbox_min_h=0, bbox_min_w=0, use_mini_mask=True):
     image, class_ids, bboxes, masks = inputs
     shape = image.shape
     crop_h, crop_w = crop_size
 
     # Pad image
     if shape[0] < crop_h or shape[1] < crop_w:
-        image, bboxes, masks = pad_image([image, bboxes, masks], crop_h, crop_w, ignore_mask)
+        image, bboxes, masks = pad_image([image, bboxes, masks], crop_h, crop_w, use_mini_mask)
     height, width = image.shape[:2]
 
-    def _filter(indices, x, y):
-        for i in range(bboxes.shape[0]):
-            bbox = bboxes[i]
-            if bbox[0] >= x and bbox[1] >= y and bbox[2] < x + crop_w and bbox[3] < y + crop_h:
-                indices.append(i)
-
-    x, y, indices = 0, 0, []
-    while len(indices) <= 0:
-        x = random.randint(0, width - crop_w)
-        y = random.randint(0, height - crop_h)
-        _filter(indices, x, y)
+    x = random.randint(0, width - crop_w)
+    y = random.randint(0, height - crop_h)
+    bboxes[:, [0, 2]] = bboxes[:, [0, 2]].clip(x, x + crop_w)
+    bboxes[:, [1, 3]] = bboxes[:, [1, 3]].clip(y, y + crop_h)
+    ws = bboxes[:, 2] - bboxes[:, 0]
+    hs = bboxes[:, 3] - bboxes[:, 1]
+    areas = ws * hs
+    indices = np.nonzero((areas > bbox_min_area) &
+                         (ws > bbox_min_w) &
+                         (hs > bbox_min_h))[0]
 
     image = image[y:y + crop_h, x:x + crop_w, :]
     class_ids = class_ids[indices]
     bboxes = bboxes[indices, :]
-    masks = masks[:, :, indices]
-
-    if not ignore_mask:
-        masks = masks[y:y + crop_h, x:x + crop_w, :]
-
     bboxes[:, [0, 2]] -= x
     bboxes[:, [1, 3]] -= y
+    masks = masks[:, :, indices]
 
-    return image, class_ids, bboxes, masks, shape, [x, y, x + crop_w, y + crop_h]
+    if not use_mini_mask:
+        masks = masks[y:y + crop_h, x:x + crop_w, :]
+
+    return image, class_ids, bboxes, masks
 
 
 def pad_image(inputs, min_height, min_width, ignore_mask):
@@ -224,21 +190,21 @@ def pad_image(inputs, min_height, min_width, ignore_mask):
     if width < min_width:
         pad_w = min_width - width
     pad_top = pad_h // 2
-    pad_botton = pad_h - pad_top
+    pad_bottom = pad_h - pad_top
     pad_left = pad_w // 2
     pad_right = pad_w - pad_left
 
-    image = np.pad(image, ((pad_top, pad_botton), (pad_left, pad_right), (0, 0)), 'constant', 0)
+    image = np.pad(image, ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)), 'constant', 0)
     bboxes[:, [0, 2]] += pad_left
     bboxes[:, [1, 3]] += pad_top
 
     if not ignore_mask:
-        masks = np.pad(masks, ((pad_top, pad_botton), (pad_left, pad_right), (0, 0)), 'constant', 0)
+        masks = np.pad(masks, ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)), 'constant', 0)
 
     return image, bboxes, masks
 
 
-def transforms(rgb_mean, rgb_std, mode='train'):
+def transforms(rgb_mean, rgb_std, img_shape, mode='train'):
     assert mode in ['train', 'valid', 'test']
 
     def train_trans(image, bboxes, masks):
@@ -246,12 +212,15 @@ def transforms(rgb_mean, rgb_std, mode='train'):
         if random.randint(0, 1):
             image = np.fliplr(image)
             masks = np.fliplr(masks)
-            width = image.shape[1]
-            bboxes[:, 0], bboxes[:, 2] = width - bboxes[:, 2], width - bboxes[:, 0]
+            bboxes[:, 0], bboxes[:, 2] = 1 - bboxes[:, 2], 1 - bboxes[:, 0]
 
         # Normalize Image
         image = image.astype(np.float32) / 255.0
         image = (image - rgb_mean) / rgb_std
+
+        # Resize Image
+        if image.shape[0] != img_shape[0] or image.shape[1] != img_shape[1]:
+            image = trans.resize(image, img_shape, order=1)
 
         return {
             'image': image,
@@ -260,8 +229,14 @@ def transforms(rgb_mean, rgb_std, mode='train'):
         }
 
     def infer_trans(image, bboxes, masks):
+        # Normalize Image
         image = image.astype(np.float32) / 255.0
         image = (image - rgb_mean) / rgb_std
+
+        # Resize Image
+        if image.shape[0] != img_shape[0] or image.shape[1] != img_shape[1]:
+            image = trans.resize(image, img_shape, order=1)
+
         return {
             'image': image,
             'bboxes': bboxes,
@@ -287,11 +262,17 @@ def build_rpn_targets(anchors, gt_bboxes, config: Config):
     rpn_deltas: [N, (dx, dy, log(dw), log(dh))] Anchor bbox deltas.
     """
     anchors = torch.tensor(anchors)
+    norm = torch.tensor([config.IMAGE_SHAPE[1], config.IMAGE_SHAPE[0],
+                         config.IMAGE_SHAPE[1], config.IMAGE_SHAPE[0]]).float()
+    anchors /= norm
+
     gt_bboxes = torch.tensor(gt_bboxes)
     # RPN Match: 1 = positive anchor, -1 = negative anchor, 0 = neutral
     rpn_matches = torch.zeros((anchors.size(0),))
     # RPN bounding box offsets: [max anchors per image, (dx, dy, log(dw), log(dh))]
     rpn_deltas = torch.zeros((config.RPN_TRAIN_ANCHORS_PER_IMAGE, 4))
+    if len(gt_bboxes) == 0:
+        return rpn_matches, rpn_deltas
 
     # Compute overlaps [num_anchors, num_gt_boxes]
     overlaps = ops.box_iou(anchors, gt_bboxes)
@@ -346,13 +327,21 @@ if __name__ == '__main__':
     from torch.utils.data import DataLoader
 
     cfg = Config()
-    data_train = AcneSegDataset(cfg.DATA_BASE_DIR, 'train', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, 'train'))
-    data_valid = AcneSegDataset(cfg.DATA_BASE_DIR, 'valid', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, 'valid'))
-    data_test = AcneSegDataset(cfg.DATA_BASE_DIR, 'test', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, 'test'))
+    data_train = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'images'),
+                                os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_train.json'),
+                                'train', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, cfg.IMAGE_SHAPE[:2], 'train'))
+    data_valid = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'valid_patch'),
+                                os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_valid.json'),
+                                'valid', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, cfg.IMAGE_SHAPE[:2], 'valid'))
+    data_test = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'test_patch'),
+                               os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_test.json'),
+                               'test', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, cfg.IMAGE_SHAPE[:2], 'test'))
     iter_train = DataLoader(data_train, batch_size=cfg.BATCH_SIZE,
                             shuffle=True, num_workers=cfg.NUM_WORKERS)
     iter_valid = DataLoader(data_valid, batch_size=cfg.BATCH_SIZE,
                             shuffle=False, num_workers=cfg.NUM_WORKERS)
+    iter_test = DataLoader(data_test, batch_size=cfg.BATCH_SIZE,
+                           shuffle=False, num_workers=cfg.NUM_WORKERS)
 
     start = time.time()
     for data in tqdm.tqdm(iter_train):
@@ -365,6 +354,6 @@ if __name__ == '__main__':
     print(f'Load valid data cost: {time.time() - start}sec({(time.time() - start) / len(data_valid)}sec per sample)')
 
     start = time.time()
-    for i in tqdm.tqdm(range(len(data_test))):
-        data = data_test[i]
+    for data in tqdm.tqdm(iter_test):
+        continue
     print(f'Load test data cost: {time.time() - start}sec({(time.time() - start) / len(data_test)}sec per sample)')

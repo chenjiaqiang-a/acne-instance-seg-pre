@@ -13,7 +13,7 @@ print(f'Total data: {len(filenames)}')
 
 test_list = random.sample(filenames, int(len(filenames)/5))
 train_list = [filename for filename in filenames if filename not in test_list]
-valid_list = random.sample(train_list, int(len(train_list)/5))
+valid_list = random.sample(train_list, int(len(train_list)/10))
 train_list = [filename for filename in train_list if filename not in valid_list]
 print(f'Train Samples: {len(train_list)}')
 print(f'Valid Samples: {len(valid_list)}')

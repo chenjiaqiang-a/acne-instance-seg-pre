@@ -10,14 +10,13 @@ import torch.nn.functional as F
 from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchvision import ops
 from pycocotools import mask as mask_utils
 from pycocotools.cocoeval import COCOeval
 
 import utils
 from config import Config
 from model import MaskRCNN
-from acne_data import AcneSegDataset, transforms, parse_image_metas, expand_mask
+from acne_data import AcneSegDataset, transforms, expand_mask
 
 ###################################################################
 # Global Variables
@@ -80,11 +79,6 @@ fh = logging.FileHandler(os.path.join(RUNNING_INFO_DIR, start_time+'.log'))
 fh.setLevel(logging.INFO)
 fh.setFormatter(formatter)
 _logger.addHandler(fh)
-# console handler
-ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
-ch.setFormatter(formatter)
-_logger.addHandler(ch)
 
 # Create SummaryWriter
 _writer = SummaryWriter(TENSORBOARD_LOGS_DIR)
@@ -93,8 +87,7 @@ _writer = SummaryWriter(TENSORBOARD_LOGS_DIR)
 # Train
 ###################################################################
 
-
-def train(model, train_loader, valid_loader, layers, learning_rate, epochs, config):
+def train(model, train_loader, valid_loader, layers, learning_rate, config):
     """Train the model.
     model: The Mask R-CNN model.
     train_loader, valid_loader: Training and validation Dataloader objects.
@@ -123,8 +116,16 @@ def train(model, train_loader, valid_loader, layers, learning_rate, epochs, conf
         # All layers
         "all": ".*",
     }
+    train_epochs = {
+        'heads': 4000,
+        '3+': 12000,
+        '4+': 12000,
+        '5+': 12000,
+        'all': 16000.
+    }
     assert layers in layer_regex.keys()
     utils.set_trainable(model, layer_regex[layers])
+    epochs = train_epochs[layers]
 
     # Optimizer object
     # Add L2 Regularization
@@ -138,88 +139,82 @@ def train(model, train_loader, valid_loader, layers, learning_rate, epochs, conf
         {'params': trainables_only_bn}
     ], lr=learning_rate, momentum=config.LEARNING_MOMENTUM)
 
-    for epoch in range(1, epochs + 1):
+    train_iter = iter(train_loader)
+    loss_sum = 0
+    for epoch in tqdm.tqdm(range(1, epochs + 1)):
+        try:
+            inputs = next(train_iter)
+        except StopIteration:
+            train_iter = iter(train_loader)
+            inputs = next(train_iter)
+        
         # Training
         loss, loss_rpn_class, loss_rpn_bbox,\
             loss_mrcnn_class, loss_mrcnn_bbox, loss_mrcnn_mask = \
-            train_epoch(model, train_loader, optimizer)
-
-        # Validation
-        val_loss, val_loss_rpn_class, val_loss_rpn_bbox,\
-            val_loss_mrcnn_class, val_loss_mrcnn_bbox, val_loss_mrcnn_mask = \
-            valid_epoch(model, valid_loader)
-
-        # Statistics
+            train_epoch(model, inputs, optimizer)
+        
         _writer.add_scalar(f'{layers}/loss', loss, epoch)
         _writer.add_scalar(f'{layers}/loss_rpn_class', loss_rpn_class, epoch)
         _writer.add_scalar(f'{layers}/loss_rpn_bbox', loss_rpn_bbox, epoch)
         _writer.add_scalar(f'{layers}/loss_mrcnn_class', loss_mrcnn_class, epoch)
         _writer.add_scalar(f'{layers}/loss_mrcnn_bbox', loss_mrcnn_bbox, epoch)
         _writer.add_scalar(f'{layers}/loss_mrcnn_mask', loss_mrcnn_mask, epoch)
-        _writer.add_scalar(f'{layers}/val_loss', val_loss, epoch)
-        _writer.add_scalar(f'{layers}/val_loss_rpn_class', val_loss_rpn_class, epoch)
-        _writer.add_scalar(f'{layers}/val_loss_rpn_bbox', val_loss_rpn_bbox, epoch)
-        _writer.add_scalar(f'{layers}/val_loss_mrcnn_class', val_loss_mrcnn_class, epoch)
-        _writer.add_scalar(f'{layers}/val_loss_mrcnn_bbox', val_loss_mrcnn_bbox, epoch)
-        _writer.add_scalar(f'{layers}/val_loss_mrcnn_mask', val_loss_mrcnn_mask, epoch)
 
-        _logger.info(f'epoch {epoch:03d} | train loss {loss:.6f} | valid loss {val_loss:.6f}')
+        loss_sum += loss.detach().cpu().item() / config.VALID_INTERVAL
+        # Validation
+        if epoch % config.VALID_INTERVAL == 0:
+            val_loss, val_loss_rpn_class, val_loss_rpn_bbox,\
+                val_loss_mrcnn_class, val_loss_mrcnn_bbox, val_loss_mrcnn_mask = \
+                valid_epoch(model, valid_loader)
+
+            _writer.add_scalar(f'{layers}/val_loss', val_loss, epoch)
+            _writer.add_scalar(f'{layers}/val_loss_rpn_class', val_loss_rpn_class, epoch)
+            _writer.add_scalar(f'{layers}/val_loss_rpn_bbox', val_loss_rpn_bbox, epoch)
+            _writer.add_scalar(f'{layers}/val_loss_mrcnn_class', val_loss_mrcnn_class, epoch)
+            _writer.add_scalar(f'{layers}/val_loss_mrcnn_bbox', val_loss_mrcnn_bbox, epoch)
+            _writer.add_scalar(f'{layers}/val_loss_mrcnn_mask', val_loss_mrcnn_mask, epoch)
+
+            _logger.info(f'epoch {epoch:04d} | train loss {loss:.6f} | valid loss {val_loss:.6f}')
 
         # Save model
         if epoch % config.SAVE_INTERVAL == 0:
             torch.save(model.state_dict(), os.path.join(
-                MODAL_SAVE_DIR, f'{config.BACKBONE_ARCH}_{layers}_epoch_{epoch:03d}.pth'))
+                MODAL_SAVE_DIR, f'{config.BACKBONE_ARCH}_{layers}_epoch_{epoch:06d}.pth'))
 
 
-def train_epoch(model, dataloader, optimizer):
-    loss_sum = 0
-    loss_rpn_class_sum = 0
-    loss_rpn_bbox_sum = 0
-    loss_mrcnn_class_sum = 0
-    loss_mrcnn_bbox_sum = 0
-    loss_mrcnn_mask_sum = 0
-
+def train_epoch(model, inputs, optimizer):
     model.train()
-    steps = len(dataloader)
-    for inputs in tqdm.tqdm(dataloader):
-        images = inputs[0].to(_device)  # [BS, 3, H, W]
-        rpn_matches = inputs[2].to(_device)  # [BS, num_anchors, 1]
-        rpn_deltas = inputs[3].to(_device)  # [BS, rpn_per_image, 4]
-        gt_class_ids = inputs[4].to(_device)  # [BS, N]
-        gt_bboxes = inputs[5].to(_device)  # [BS, N, 4]
-        gt_masks = inputs[6].to(_device)  # [BS, N, m_H, m_W]
 
-        # Run object detection
-        rpn_pred_logits, rpn_pred_deltas,\
-            target_class_ids, mrcnn_class_logits,\
-            target_deltas, mrcnn_deltas,\
-            target_masks, mrcnn_masks = \
-            model([images, gt_class_ids, gt_bboxes, gt_masks])
+    images = inputs[0].to(_device)  # [BS, 3, H, W]
+    rpn_matches = inputs[1].to(_device)  # [BS, num_anchors, 1]
+    rpn_deltas = inputs[2].to(_device)  # [BS, rpn_per_image, 4]
+    gt_class_ids = inputs[3].to(_device)  # [BS, N]
+    gt_bboxes = inputs[4].to(_device)  # [BS, N, 4]
+    gt_masks = inputs[5].to(_device)  # [BS, N, m_H, m_W]
 
-        # Compute losses
-        rpn_class_loss = compute_rpn_class_loss(rpn_pred_logits, rpn_matches)
-        rpn_bbox_loss = compute_rpn_bbox_loss(rpn_pred_deltas, rpn_deltas, rpn_matches)
-        mrcnn_class_loss = compute_mrcnn_class_loss(mrcnn_class_logits, target_class_ids)
-        mrcnn_bbox_loss = compute_mrcnn_bbox_loss(mrcnn_deltas, target_deltas, target_class_ids)
-        mrcnn_mask_loss = compute_mrcnn_mask_loss(mrcnn_masks, target_masks, target_class_ids)
-        loss = rpn_class_loss + rpn_bbox_loss + mrcnn_class_loss + mrcnn_bbox_loss + mrcnn_mask_loss
+    # Run object detection
+    rpn_pred_logits, rpn_pred_deltas,\
+        target_class_ids, mrcnn_class_logits,\
+        target_deltas, mrcnn_deltas,\
+        target_masks, mrcnn_masks = \
+        model([images, gt_class_ids, gt_bboxes, gt_masks])
 
-        # Backpropagation
-        optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-        optimizer.step()
+    # Compute losses
+    rpn_class_loss = compute_rpn_class_loss(rpn_pred_logits, rpn_matches)
+    rpn_bbox_loss = compute_rpn_bbox_loss(rpn_pred_deltas, rpn_deltas, rpn_matches)
+    mrcnn_class_loss = compute_mrcnn_class_loss(mrcnn_class_logits, target_class_ids)
+    mrcnn_bbox_loss = compute_mrcnn_bbox_loss(mrcnn_deltas, target_deltas, target_class_ids)
+    mrcnn_mask_loss = compute_mrcnn_mask_loss(mrcnn_masks, target_masks, target_class_ids)
+    loss = rpn_class_loss + rpn_bbox_loss + mrcnn_class_loss + mrcnn_bbox_loss + mrcnn_mask_loss
 
-        # Statistics
-        loss_sum += loss.detach().cpu().item() / steps
-        loss_rpn_class_sum += rpn_class_loss.detach().cpu().item() / steps
-        loss_rpn_bbox_sum += rpn_bbox_loss.detach().cpu().item() / steps
-        loss_mrcnn_class_sum += mrcnn_class_loss.detach().cpu().item() / steps
-        loss_mrcnn_bbox_sum += mrcnn_bbox_loss.detach().cpu().item() / steps
-        loss_mrcnn_mask_sum += mrcnn_mask_loss.detach().cpu().item() / steps
+    # Backpropagation
+    optimizer.zero_grad()
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+    optimizer.step()
 
-    return loss_sum, loss_rpn_class_sum, loss_rpn_bbox_sum,\
-        loss_mrcnn_class_sum, loss_mrcnn_bbox_sum, loss_mrcnn_mask_sum
+    return loss, rpn_class_loss, rpn_bbox_loss,\
+        mrcnn_class_loss, mrcnn_bbox_loss, mrcnn_mask_loss
 
 
 @torch.no_grad()
@@ -235,11 +230,11 @@ def valid_epoch(model, dataloader):
     steps = len(dataloader)
     for inputs in tqdm.tqdm(dataloader):
         images = inputs[0].to(_device)
-        rpn_matches = inputs[2].to(_device)
-        rpn_deltas = inputs[3].to(_device)
-        gt_class_ids = inputs[4].to(_device)
-        gt_boxes = inputs[5].to(_device)
-        gt_masks = inputs[6].to(_device)
+        rpn_matches = inputs[1].to(_device)
+        rpn_deltas = inputs[2].to(_device)
+        gt_class_ids = inputs[3].to(_device)
+        gt_boxes = inputs[4].to(_device)
+        gt_masks = inputs[5].to(_device)
 
         # Run object detection
         rpn_class_logits, rpn_pred_deltas,\
@@ -390,32 +385,28 @@ def compute_mrcnn_mask_loss(pred_masks, target_masks, target_class_ids):
 # Evaluate
 ###################################################################
 
-
 def evaluate(model, dataset, config):
     total_time = 0
+    dataloader = DataLoader(
+        dataset, config.BATCH_SIZE * 2, shuffle=False, num_workers=config.NUM_WORKERS)
 
     pred_results = []
-    for i in tqdm.tqdm(range(len(dataset))):
-        image_patches, image_metas = dataset[i]
-
+    for images, img_ids in tqdm.tqdm(dataloader):
         start = time.time()
-        pred_class_ids, pred_scores, pred_bboxes, pred_masks = infer(model, image_patches, image_metas, config)
-        infer_time = time.time() - start
-        total_time += infer_time
+        pred_class_ids, pred_scores, pred_bboxes, pred_masks = infer(model, images, config)
+        total_time += time.time() - start
 
-        image_mate = image_metas[0].numpy()
-        img_id = image_mate[0]
-        shape = image_mate[1:4]
-        _logger.info(f'infer {img_id:03d} cost {infer_time:.3f} sec')
+        for i in range(len(img_ids)):
+            pred_results.extend(generate_coco_format_result(
+                img_ids[i].item(),
+                pred_class_ids[i],
+                pred_scores[i],
+                pred_bboxes[i],
+                pred_masks[i],
+                config.IMAGE_SHAPE[:2],
+            ))
 
-        pred_results.extend(generate_coco_format_result(
-            img_id,
-            pred_class_ids,
-            pred_scores,
-            pred_bboxes,
-            pred_masks,
-            shape,
-        ))
+    _logger.info(f'Total Time: {total_time} sec({total_time / len(dataset)}sec/image)')
 
     pred_results = dataset.coco.loadRes(pred_results)
 
@@ -423,66 +414,60 @@ def evaluate(model, dataset, config):
     eval_bbox.evaluate()
     eval_bbox.accumulate()
     eval_bbox.summarize()
+    _logger.info(f'\nEvaluate bbox\n'
+                 f'AP   = {eval_bbox.stats[0]:.4f}\n'
+                 f'AP50 = {eval_bbox.stats[1]:.4f}\n'
+                 f'AP75 = {eval_bbox.stats[2]:.4f}')
 
     eval_mask = COCOeval(dataset.coco, pred_results, 'segm')
     eval_mask.evaluate()
     eval_mask.accumulate()
     eval_mask.summarize()
-
-    _logger.info(f'Total Time: {total_time} sec({total_time / len(dataset)}sec/image)')
+    _logger.info(f'\nEvaluate segm\n'
+                 f'AP   = {eval_mask.stats[0]:.4f}\n'
+                 f'AP50 = {eval_mask.stats[1]:.4f}\n'
+                 f'AP75 = {eval_mask.stats[2]:.4f}')
 
 
 @torch.no_grad()
-def infer(model, image_patches, image_metas, config):
+def infer(model, images, config):
     model.eval()
-    image_patches = image_patches.to(_device)
+    images = images.to(_device)
 
-    patches = image_patches.size(0)
-    detections, masks = model([image_patches])
+    bs = images.size(0)
+    detections, masks = model([images])
     bboxes, class_ids, scores = detections[:, :, :4], detections[:, :, 4].long(), detections[:, :, 5]
-    _, _, windows = parse_image_metas(image_metas)
 
     pred_class_ids = []
     pred_scores = []
     pred_bboxes = []
     pred_masks = []
-    for i in range(patches):
+    for i in range(bs):
         # Filter out background
         idx = torch.nonzero(class_ids[i])[:, 0]
-        p_class_ids = class_ids[i, idx]
-        p_scores = scores[i, idx]
-        p_bboxes = bboxes[i, idx]
-        p_masks = masks[i, idx, p_class_ids]
-        window = windows[i]
+        b_class_ids = class_ids[i, idx]
+        b_scores = scores[i, idx]
+        b_bboxes = bboxes[i, idx]
+        b_masks = masks[i, idx, b_class_ids]
 
-        p_bboxes[:, [0, 2]] *= window[2] - window[0]
-        p_bboxes[:, [1, 3]] *= window[3] - window[1]
-        p_bboxes[:, [0, 2]] += window[0]
-        p_bboxes[:, [1, 3]] += window[1]
-        p_bboxes = p_bboxes.round()
+        b_bboxes[:, [0, 2]] *= config.IMAGE_SHAPE[0]
+        b_bboxes[:, [1, 3]] *= config.IMAGE_SHAPE[1]
+        b_bboxes = utils.clip_boxes(b_bboxes, [0, 0, config.IMAGE_SHAPE[0], config.IMAGE_SHAPE[1]])
+        b_bboxes = b_bboxes.round()
 
         # Filter out detections with zero area. Often only happens in early
         # stages of training when the network weights are still a bit random.
-        areas = (p_bboxes[:, 2] - p_bboxes[:, 0]) * (p_bboxes[:, 3] - p_bboxes[:, 1])
+        areas = (b_bboxes[:, 2] - b_bboxes[:, 0]) * (b_bboxes[:, 3] - b_bboxes[:, 1])
         idx = torch.nonzero(areas > 0)[:, 0]
-        p_class_ids = p_class_ids[idx]
-        p_scores = p_scores[idx]
-        p_bboxes = p_bboxes[idx]
-        p_masks = p_masks[idx]
+        b_class_ids = b_class_ids[idx]
+        b_scores = b_scores[idx]
+        b_bboxes = b_bboxes[idx]
+        b_masks = b_masks[idx]
 
-        pred_class_ids.append(p_class_ids.int().cpu().numpy())
-        pred_scores.append(p_scores)
-        pred_bboxes.append(p_bboxes)
-        pred_masks.append(p_masks.cpu().numpy().transpose((1, 2, 0)))
-    pred_bboxes = torch.cat(pred_bboxes, dim=0)
-    pred_scores = torch.cat(pred_scores, dim=0)
-    keep = ops.nms(pred_bboxes, pred_scores, config.DETECTION_NMS_THRESHOLD)
-    keep = keep.cpu().numpy()
-
-    pred_class_ids = np.concatenate(pred_class_ids, axis=0)[keep]
-    pred_scores = pred_scores.cpu().numpy()[keep]
-    pred_bboxes = pred_bboxes.cpu().numpy()[keep]
-    pred_masks = np.concatenate(pred_masks, axis=2)[:, :, keep]
+        pred_class_ids.append(b_class_ids.int().cpu().numpy())
+        pred_scores.append(b_scores.cpu().numpy())
+        pred_bboxes.append(b_bboxes.cpu().numpy())
+        pred_masks.append(b_masks.cpu().numpy().transpose((1, 2, 0)))
 
     return pred_class_ids, pred_scores, pred_bboxes, pred_masks
 
@@ -505,19 +490,19 @@ if __name__ == '__main__':
     _logger.info(f'Acne Detection and Segmentation with Mask R-CNN - {args.command}')
 
     # Configurations
-    config = Config()
-    _logger.info(str(config))
+    cfg = Config()
+    _logger.info(str(cfg))
 
     # Devices
-    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(id) for id in config.GPU_IDS])
-    if torch.cuda.is_available() and config.USE_GPU:
+    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(id) for id in cfg.GPU_IDS])
+    if torch.cuda.is_available() and cfg.USE_GPU:
         _device = torch.device('cuda:0')
     else:
         _device = torch.device('cpu')
 
     # Create model
-    mrcnn = MaskRCNN(config)
-    if config.USE_GPU and len(config.GPU_IDS) > 1:
+    mrcnn = MaskRCNN(cfg)
+    if cfg.USE_GPU and len(cfg.GPU_IDS) > 1:
         mrcnn = torch.nn.DataParallel(mrcnn)
     mrcnn.to(_device)
 
@@ -536,44 +521,44 @@ if __name__ == '__main__':
 
     if args.command == 'train':
         # Training dataset
-        dataset_train = AcneSegDataset(config.DATA_BASE_DIR, 'train', config,
-                                       transforms(config.RGB_MEAN, config.RGB_STD, 'train'))
+        dataset_train = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'images'),
+                                       os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_train.json'),
+                                       'train', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, cfg.IMAGE_SHAPE[:2], 'train'))
         train_loader = DataLoader(
-            dataset_train, config.BATCH_SIZE, shuffle=True, num_workers=config.NUM_WORKERS)
+            dataset_train, cfg.BATCH_SIZE, shuffle=True, num_workers=cfg.NUM_WORKERS)
         # Validation dataset
-        dataset_valid = AcneSegDataset(config.DATA_BASE_DIR, 'valid', config,
-                                       transforms(config.RGB_MEAN, config.RGB_STD, 'valid'))
+        dataset_valid = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'valid_patch'),
+                                       os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_valid.json'),
+                                       'valid', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, cfg.IMAGE_SHAPE[:2], 'valid'))
         valid_loader = DataLoader(
-            dataset_valid, config.BATCH_SIZE, shuffle=False, num_workers=config.NUM_WORKERS)
+            dataset_valid, cfg.BATCH_SIZE * 2, shuffle=False, num_workers=cfg.NUM_WORKERS)
 
         # Training - Stage 1
         _logger.info("Training network heads")
         train(mrcnn, train_loader, valid_loader,
               layers='heads',
-              learning_rate=config.LEARNING_RATE,
-              epochs=40,
-              config=config)
+              learning_rate=cfg.LEARNING_RATE,
+              config=cfg)
 
         # Training - Stage 2
         # Finetune layers from ResNet stage 4 and up
         _logger.info("Fine tune Resnet stage 4 and up")
         train(mrcnn, train_loader, valid_loader,
               layers='4+',
-              learning_rate=config.LEARNING_RATE,
-              epochs=120,
-              config=config)
+              learning_rate=cfg.LEARNING_RATE,
+              config=cfg)
 
         # Training - Stage 3
         # Fine tune all layers
         _logger.info("Fine tune all layers")
         train(mrcnn, train_loader, valid_loader,
               layers='all',
-              learning_rate=config.LEARNING_RATE / 10,
-              epochs=160,
-              config=config)
+              learning_rate=cfg.LEARNING_RATE / 10,
+              config=cfg)
     else:
         # Test dataset
-        dataset_test = AcneSegDataset(config.DATA_BASE_DIR, 'test', config,
-                                      transforms(config.RGB_MEAN, config.RGB_STD, 'test'))
-        evaluate(mrcnn, dataset_test, config)
+        dataset_test = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'test_patch'),
+                                      os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_test.json'),
+                                      'test', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, cfg.IMAGE_SHAPE[:2], 'test'))
+        evaluate(mrcnn, dataset_test, cfg)
     _writer.close()
