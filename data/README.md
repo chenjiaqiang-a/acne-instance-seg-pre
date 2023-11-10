@@ -34,4 +34,3 @@
 +---valid_patch
 \---test_patch
 ```
-提供经过清理后的ACNE_seg数据集仅包含经过标注的数据，且标签为COCO格式

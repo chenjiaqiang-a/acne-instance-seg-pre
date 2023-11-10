@@ -99,7 +99,7 @@ class Config(object):
     DETECTION_MAX_INSTANCES = 100
     # Minimum probability value to accept a detected instance
     # ROIs below this threshold are skipped
-    DETECTION_MIN_CONFIDENCE = 0.5
+    DETECTION_MIN_CONFIDENCE = 0.7
     # Non-maximum suppression threshold for detection
     DETECTION_NMS_THRESHOLD = 0.3
 
@@ -107,10 +107,10 @@ class Config(object):
     # The Mask RCNN paper uses lr=0.02, but on TensorFlow it causes
     # weights to explode. Likely due to differences in optimzer
     # implementation.
-    LEARNING_RATE = 0.001
+    LEARNING_RATE = 0.02
     LEARNING_MOMENTUM = 0.9
     SAVE_INTERVAL = 2000
-    VALID_INTERVAL = 100
+    VALID_INTERVAL = -1
     # Weight decay regularization
     WEIGHT_DECAY = 0.0001
 

@@ -121,7 +121,7 @@ def train(model, train_loader, valid_loader, layers, learning_rate, config):
         '3+': 12000,
         '4+': 12000,
         '5+': 12000,
-        'all': 16000.
+        'all': 16000,
     }
     assert layers in layer_regex.keys()
     utils.set_trainable(model, layer_regex[layers])
@@ -162,7 +162,7 @@ def train(model, train_loader, valid_loader, layers, learning_rate, config):
 
         loss_sum += loss.detach().cpu().item() / config.VALID_INTERVAL
         # Validation
-        if epoch % config.VALID_INTERVAL == 0:
+        if config.VALID_INTERVAL > 0 and epoch % config.VALID_INTERVAL == 0:
             val_loss, val_loss_rpn_class, val_loss_rpn_bbox,\
                 val_loss_mrcnn_class, val_loss_mrcnn_bbox, val_loss_mrcnn_mask = \
                 valid_epoch(model, valid_loader)
@@ -531,7 +531,7 @@ if __name__ == '__main__':
                                        os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_valid.json'),
                                        'valid', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, cfg.IMAGE_SHAPE[:2], 'valid'))
         valid_loader = DataLoader(
-            dataset_valid, cfg.BATCH_SIZE * 2, shuffle=False, num_workers=cfg.NUM_WORKERS)
+            dataset_valid, cfg.BATCH_SIZE, shuffle=False, num_workers=cfg.NUM_WORKERS)
 
         # Training - Stage 1
         _logger.info("Training network heads")
@@ -545,7 +545,7 @@ if __name__ == '__main__':
         _logger.info("Fine tune Resnet stage 4 and up")
         train(mrcnn, train_loader, valid_loader,
               layers='4+',
-              learning_rate=cfg.LEARNING_RATE,
+              learning_rate=cfg.LEARNING_RATE / 10,
               config=cfg)
 
         # Training - Stage 3
@@ -553,7 +553,7 @@ if __name__ == '__main__':
         _logger.info("Fine tune all layers")
         train(mrcnn, train_loader, valid_loader,
               layers='all',
-              learning_rate=cfg.LEARNING_RATE / 10,
+              learning_rate=cfg.LEARNING_RATE / 100,
               config=cfg)
     else:
         # Test dataset

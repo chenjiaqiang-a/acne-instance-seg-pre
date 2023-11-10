@@ -340,7 +340,7 @@ if __name__ == '__main__':
                             shuffle=True, num_workers=cfg.NUM_WORKERS)
     iter_valid = DataLoader(data_valid, batch_size=cfg.BATCH_SIZE,
                             shuffle=False, num_workers=cfg.NUM_WORKERS)
-    iter_test = DataLoader(data_test, batch_size=cfg.BATCH_SIZE,
+    iter_test = DataLoader(data_test, batch_size=cfg.BATCH_SIZE * 2,
                            shuffle=False, num_workers=cfg.NUM_WORKERS)
 
     start = time.time()
