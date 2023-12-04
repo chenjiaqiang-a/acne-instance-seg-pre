@@ -5,9 +5,12 @@ import json
 import numpy as np
 import skimage.io as io
 
-base_dir = './ACNE'
+base_dir = './ACNE_seg'
 img_dir = os.path.join(base_dir, 'images')
-ann_dir = os.path.join(base_dir, 'annotations')
+ann_dir = './ACNE/annotations/'
+
+if not os.path.exists(os.path.join(base_dir, 'annotations')):
+    os.makedirs(os.path.join(base_dir, 'annotations'))
 
 today = datetime.date.today()
 base_obj = {
@@ -98,7 +101,7 @@ for file in filelist:
             })
             ann_id += 1
     img_id += 1
-with open(os.path.join(ann_dir, 'acne_train.json'), 'w', encoding='utf8') as fp:
+with open(os.path.join(base_dir, 'annotations', 'acne_train.json'), 'w', encoding='utf8') as fp:
     json.dump(train_obj, fp)
 
 
@@ -195,7 +198,7 @@ for file in filelist:
                 })
                 ann_id += 1
         img_id += 1
-with open(os.path.join(ann_dir, 'acne_valid.json'), 'w', encoding='utf8') as fp:
+with open(os.path.join(base_dir, 'annotations', 'acne_valid.json'), 'w', encoding='utf8') as fp:
     json.dump(valid_obj, fp)
 
 print(f'creating test data annotation')
@@ -250,7 +253,7 @@ for file in filelist:
                 })
                 ann_id += 1
         img_id += 1
-with open(os.path.join(ann_dir, 'acne_test.json'), 'w', encoding='utf8') as fp:
+with open(os.path.join(base_dir, 'annotations', 'acne_test.json'), 'w', encoding='utf8') as fp:
     json.dump(test_obj, fp)
 
 print('Done!')

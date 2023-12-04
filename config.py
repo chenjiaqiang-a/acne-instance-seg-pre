@@ -30,8 +30,7 @@ class Config(object):
     GPU_IDS = [0]
 
     # Dataset config
-    DATA_BASE_DIR = '../autodl-tmp/ACNE_seg'
-    # DATA_BASE_DIR = 'F:/dataset/ACNE_seg'
+    DATA_BASE_DIR = 'data/ACNE_seg/'
     IMAGE_SHAPE = [1024, 1024, 3]
     BATCH_SIZE = 4
     NUM_WORKERS = 8

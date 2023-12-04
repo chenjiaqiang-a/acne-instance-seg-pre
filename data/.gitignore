@@ -1,5 +1,6 @@
 /ACNE/images
 /ACNE/annotations
+/ACNE/other
 
 .DS_STORE
 *.rar
@@ -15,3 +16,4 @@
 *.jpg
 
 *.json
+*.txt
