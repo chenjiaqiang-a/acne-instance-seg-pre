@@ -5,12 +5,15 @@ import json
 import numpy as np
 import skimage.io as io
 
-base_dir = './ACNE_seg'
-img_dir = os.path.join(base_dir, 'images')
-ann_dir = './ACNE/annotations/'
+base_dir = './ACNE_det/'
+img_dir = './ACNE_det/images/'
+ann_dir = './ACNE_det/annotations/'
+src_img_dir = './ACNE/images/'
+src_ann_dir = './ACNE/annotations/'
 
-if not os.path.exists(os.path.join(base_dir, 'annotations')):
-    os.makedirs(os.path.join(base_dir, 'annotations'))
+if not os.path.exists(img_dir):
+    os.makedirs(img_dir)
+    os.makedirs(ann_dir)
 
 today = datetime.date.today()
 base_obj = {
@@ -25,7 +28,7 @@ base_obj = {
     'images': [],
     'annotations': [],
     'categories': [],
-    'license': [],
+    'licenses': [],
 }
 categories = ['papule', 'nevus', 'nodule',
               'open_comedo', 'closed_comedo',
@@ -72,15 +75,18 @@ with open(os.path.join(base_dir, 'train_list.txt'), 'r', encoding='utf8') as fp:
     filelist = fp.read().split('\n')
 for file in filelist:
     print(file)
-    with open(os.path.join(ann_dir, file + '.json'), 'r', encoding='utf8') as fp:
+    with open(os.path.join(src_ann_dir, file + '.json'), 'r', encoding='utf8') as fp:
         ann = json.load(fp)
-    image = {
+    image = io.imread(src_img_dir + file + '.jpg')
+    io.imsave(img_dir + f'{img_id:08d}.jpg', image)
+    train_obj['images'].append({
         'id': img_id,
         'width': ann['imageWidth'],
         'height': ann['imageHeight'],
-        'file_name': file + '.jpg',
-    }
-    train_obj['images'].append(image)
+        'file_name': f'{img_id:08d}.jpg',
+        'source_file': file + '.jpg',
+        'meta': [ann['imageHeight'], ann['imageWidth'], 0, 0, ann['imageWidth'], ann['imageHeight']]
+    })
     window = [0, 0, ann['imageWidth'], ann['imageHeight']]
     for shape in ann['shapes']:
         points = np.array(shape['points'])
@@ -101,7 +107,7 @@ for file in filelist:
             })
             ann_id += 1
     img_id += 1
-with open(os.path.join(base_dir, 'annotations', 'acne_train.json'), 'w', encoding='utf8') as fp:
+with open(os.path.join(ann_dir, 'acne_train.json'), 'w', encoding='utf8') as fp:
     json.dump(train_obj, fp)
 
 
@@ -155,9 +161,9 @@ with open(os.path.join(base_dir, 'valid_list.txt'), 'r', encoding='utf8') as fp:
     filelist = fp.read().split('\n')
 for file in filelist:
     print(file)
-    with open(os.path.join(ann_dir, file + '.json'), 'r', encoding='utf8') as fp:
+    with open(os.path.join(src_ann_dir, file + '.json'), 'r', encoding='utf8') as fp:
         ann = json.load(fp)
-    image = io.imread(os.path.join(img_dir, file + '.jpg'))
+    image = io.imread(os.path.join(src_img_dir, file + '.jpg'))
     win_gen = WindowGenerator(ann['imageHeight'], ann['imageWidth'],
                               WIN_SIZE[0], WIN_SIZE[1], WIN_STRIDE[0], WIN_STRIDE[1])
 
@@ -198,7 +204,7 @@ for file in filelist:
                 })
                 ann_id += 1
         img_id += 1
-with open(os.path.join(base_dir, 'annotations', 'acne_valid.json'), 'w', encoding='utf8') as fp:
+with open(os.path.join(ann_dir, 'acne_valid.json'), 'w', encoding='utf8') as fp:
     json.dump(valid_obj, fp)
 
 print(f'creating test data annotation')
@@ -210,9 +216,9 @@ with open(os.path.join(base_dir, 'test_list.txt'), 'r', encoding='utf8') as fp:
     filelist = fp.read().split('\n')
 for file in filelist:
     print(file)
-    with open(os.path.join(ann_dir, file + '.json'), 'r', encoding='utf8') as fp:
+    with open(os.path.join(src_ann_dir, file + '.json'), 'r', encoding='utf8') as fp:
         ann = json.load(fp)
-    image = io.imread(os.path.join(img_dir, file + '.jpg'))
+    image = io.imread(os.path.join(src_img_dir, file + '.jpg'))
     win_gen = WindowGenerator(ann['imageHeight'], ann['imageWidth'],
                               WIN_SIZE[0], WIN_SIZE[1], WIN_STRIDE[0], WIN_STRIDE[1])
 
@@ -253,7 +259,7 @@ for file in filelist:
                 })
                 ann_id += 1
         img_id += 1
-with open(os.path.join(base_dir, 'annotations', 'acne_test.json'), 'w', encoding='utf8') as fp:
+with open(os.path.join(ann_dir, 'acne_test.json'), 'w', encoding='utf8') as fp:
     json.dump(test_obj, fp)
 
 print('Done!')
