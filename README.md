@@ -11,7 +11,7 @@
 /acne-segmentation
 +---data                  # 存放数据
 +---acne_data.py          # 数据处理
-+---acne_seg.py           # 训练&测试
++---acne_det.py           # 训练&测试
 +---config.py             # 配置
 +---inspect_data.ipynb    # 数据处理可视化
 +---inspect_model.ipynb   # 模型结果可视化
@@ -29,4 +29,13 @@ torchvision>=0.9.0
 scikit-image==0.19.3
 pycocotools==2.0.7
 matplotlib>=3.7.0
+```
+## 训练&测试
+```shell
+# load data
+python acne_data.py
+# train
+python acne_det.py train
+# test
+python acne_det.py test --checkpoint=/path/to/weights.pth
 ```

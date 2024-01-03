@@ -11,10 +11,8 @@ from config import Config
 
 
 def _resnet_encoder_stages(arch: str, weight: str = 'DEFAULT'):
-    import os
     assert arch in ['resnet50', 'resnet101']
     assert weight in ['DEFAULT', 'IMAGENET1K_V1', 'IMAGENET1K_V2']
-    os.environ['TORCH_HOME'] = '/root/autodl-tmp/torch'
     model = resnet50(weights=weight) if arch == 'resnet50' \
         else resnet101(weights=weight)
     stagets = [
@@ -325,7 +323,7 @@ def proposal_layer(inputs, anchors, nms_threshold, proposal_count, config):
 
     # Improve performance by trimming to top anchors by score
     # and doing the rest on the smaller subset.
-    pre_nms_limit = min(6000, anchors.size(0))
+    pre_nms_limit = min(2000, anchors.size(0))
     scores, order = scores.sort(dim=1, descending=True)
     order = order[:, :pre_nms_limit]
     scores = scores[:, :pre_nms_limit]

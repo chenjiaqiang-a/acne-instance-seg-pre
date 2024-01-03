@@ -30,11 +30,10 @@ class Config(object):
     GPU_IDS = [0]
 
     # Dataset config
-    # DATA_BASE_DIR = 'data/ACNE_det/'
-    DATA_BASE_DIR = 'F:/dataset/ACNE_det/'
+    DATA_BASE_DIR = 'data/ACNE_det/'
     IMAGE_SHAPE = [1024, 1024, 3]
     BATCH_SIZE = 4
-    NUM_WORKERS = 8
+    NUM_WORKERS = 4
 
     BBOX_MIN_AREA = 50
     BBOX_MIN_WIDTH = 5
@@ -83,7 +82,7 @@ class Config(object):
     # You can reduce this during training to generate more propsals.
     RPN_NMS_THRESHOLD = 0.7
     # ROIs kept after non-maximum supression (training and inference)
-    POST_NMS_ROIS_TRAINING = 2000
+    POST_NMS_ROIS_TRAINING = 1000
     POST_NMS_ROIS_INFERENCE = 1000
 
     # Number of ROIs per image to feed to classifier/mask heads
@@ -91,17 +90,17 @@ class Config(object):
     # enough positive proposals to fill this and keep a positive:negative
     # ratio of 1:3. You can increase the number of proposals by adjusting
     # the RPN NMS threshold.
-    TRAIN_ROIS_PER_IMAGE = 200
+    TRAIN_ROIS_PER_IMAGE = 512
     # Percent of positive ROIs used to train classifier/mask heads
-    ROI_POSITIVE_RATIO = 0.33
+    ROI_POSITIVE_RATIO = 0.25
 
     # Max number of final detections
     DETECTION_MAX_INSTANCES = 100
     # Minimum probability value to accept a detected instance
     # ROIs below this threshold are skipped
-    DETECTION_MIN_CONFIDENCE = 0.7
+    DETECTION_MIN_CONFIDENCE = 0.05
     # Non-maximum suppression threshold for detection
-    DETECTION_NMS_THRESHOLD = 0.3
+    DETECTION_NMS_THRESHOLD = 0.5
 
     # Learning rate and momentum
     # The Mask RCNN paper uses lr=0.02, but on TensorFlow it causes
