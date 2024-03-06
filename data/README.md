@@ -60,7 +60,7 @@ ACNE数据集是一个用于研究痤疮严重程度分级和痤疮实例分割�
 运行`generate_coco_ann`生成COCO格式的annotation（*在构造COCO格式的annotation前，请先拆分数据集*）
 
 运行后将在`annotations`文件夹内生成`acne_train.json`、`acne_valid.json`、`acne_test.json`三个文件
-### ACNE_seg数据集结构
+### ACNE_det数据集结构
 为方便实验，请拆分数据并构造COCO格式的annotation，并按照下面的文件结构，组织数据，形成ACNE_det数据集。
 ```text
 /ACNE_det
