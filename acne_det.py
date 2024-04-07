@@ -527,8 +527,8 @@ if __name__ == '__main__':
         train_loader = DataLoader(
             dataset_train, cfg.BATCH_SIZE, shuffle=True, num_workers=cfg.NUM_WORKERS)
         # Validation dataset
-        dataset_valid = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'valid_patch'),
-                                       os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_valid.json'),
+        dataset_valid = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'test_patch'),
+                                       os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_test.json'),
                                        'valid', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, cfg.IMAGE_SHAPE[:2], 'valid'))
         valid_loader = DataLoader(
             dataset_valid, cfg.BATCH_SIZE, shuffle=False, num_workers=cfg.NUM_WORKERS)

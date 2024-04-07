@@ -152,61 +152,6 @@ class WindowGenerator:
 WIN_SIZE = [1024, 1024]
 WIN_STRIDE = [960, 960]
 
-print(f'creating valid data annotation')
-valid_save_dir = os.path.join(base_dir, 'valid_patch')
-if not os.path.exists(valid_save_dir):
-    os.makedirs(valid_save_dir)
-valid_obj = copy.deepcopy(base_obj)
-with open(os.path.join(base_dir, 'valid_list.txt'), 'r', encoding='utf8') as fp:
-    filelist = fp.read().split('\n')
-for file in filelist:
-    print(file)
-    with open(os.path.join(src_ann_dir, file + '.json'), 'r', encoding='utf8') as fp:
-        ann = json.load(fp)
-    image = io.imread(os.path.join(src_img_dir, file + '.jpg'))
-    win_gen = WindowGenerator(ann['imageHeight'], ann['imageWidth'],
-                              WIN_SIZE[0], WIN_SIZE[1], WIN_STRIDE[0], WIN_STRIDE[1])
-
-    for h_slice, w_slice in win_gen:
-        patch = image[h_slice, w_slice]
-        io.imsave(os.path.join(valid_save_dir, f'{img_id:08d}.jpg'), patch)
-        valid_obj['images'].append({
-            'id': img_id,
-            'width': 1024,
-            'height': 1024,
-            'file_name': f'{img_id:08d}.jpg',
-            'source_file': file + '.jpg',
-            'meta': [ann['imageHeight'], ann['imageWidth'],
-                     w_slice.start, h_slice.start, w_slice.stop, h_slice.stop]
-        })
-
-        window = [w_slice.start, h_slice.start, w_slice.stop, h_slice.stop]
-        for shape in ann['shapes']:
-            points = np.array(shape['points'])
-            box = points_to_bbox(points)
-            points = clip_shape(points, window)
-            box = clip_box(box, window)
-            box = [box[0], box[1], box[2] - box[0], box[3] - box[1]]
-            area = box[2] * box[3]
-            if area > MIN_AREA and box[2] > MIN_WIDTH and box[3] > MIN_HEIGHT:
-                points[:, 0] -= window[0]
-                points[:, 1] -= window[1]
-                box[0] -= window[0]
-                box[1] -= window[1]
-                valid_obj['annotations'].append({
-                    'id': ann_id,
-                    'image_id': img_id,
-                    'category_id': category_to_id[shape['label']],
-                    'segmentation': [points.flatten().tolist()],
-                    'area': area,
-                    'bbox': box,
-                    'iscrowd': 0
-                })
-                ann_id += 1
-        img_id += 1
-with open(os.path.join(ann_dir, 'acne_valid.json'), 'w', encoding='utf8') as fp:
-    json.dump(valid_obj, fp)
-
 print(f'creating test data annotation')
 test_save_dir = os.path.join(base_dir, 'test_patch')
 if not os.path.exists(test_save_dir):

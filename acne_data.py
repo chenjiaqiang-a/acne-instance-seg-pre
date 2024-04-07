@@ -330,8 +330,8 @@ if __name__ == '__main__':
     data_train = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'images'),
                                 os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_train.json'),
                                 'train', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, cfg.IMAGE_SHAPE[:2], 'train'))
-    data_valid = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'valid_patch'),
-                                os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_valid.json'),
+    data_valid = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'test_patch'),
+                                os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_test.json'),
                                 'valid', cfg, transforms(cfg.RGB_MEAN, cfg.RGB_STD, cfg.IMAGE_SHAPE[:2], 'valid'))
     data_test = AcneSegDataset(os.path.join(cfg.DATA_BASE_DIR, 'test_patch'),
                                os.path.join(cfg.DATA_BASE_DIR, 'annotations', 'acne_test.json'),

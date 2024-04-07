@@ -53,27 +53,23 @@ ACNE数据集是一个用于研究痤疮严重程度分级和痤疮实例分割�
 
 |split|count|patch|
 |-|-|-|
-|train|200|-|
-|valid|26|540|
-|test|50|1052|
+|train|240|-|
+|test|36|756|
 ### 构造COCO格式的annotation
 运行`generate_coco_ann`生成COCO格式的annotation（*在构造COCO格式的annotation前，请先拆分数据集*）
 
-运行后将在`annotations`文件夹内生成`acne_train.json`、`acne_valid.json`、`acne_test.json`三个文件
+运行后将在`annotations`文件夹内生成`acne_train.json`、`acne_test.json`两个文件
 ### ACNE_det数据集结构
 为方便实验，请拆分数据并构造COCO格式的annotation，并按照下面的文件结构，组织数据，形成ACNE_det数据集。
 ```text
 /ACNE_det
 +---annotations
 |   +---acne_train.json
-|   +---acne_valid.json
 |   \---acne_test.json
 +---images
-+---valid_patch
 +---test_patch
 +---test_list.txt
-+---train_list.txt
-\---valid_list.txt
+\---train_list.txt
 ```
 ## ACNE_cls数据集
 要开展痤疮严重程度分级实验，可以直接使用ACNE数据集，视为8分类任务，也可以使用经过进一步优化的ACNE_cls数据集。
