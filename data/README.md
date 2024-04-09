@@ -53,8 +53,8 @@ ACNE数据集是一个用于研究痤疮严重程度分级和痤疮实例分割�
 
 |split|count|patch|
 |-|-|-|
-|train|240|-|
-|test|36|756|
+|train|250|-|
+|test|26|552|
 ### 构造COCO格式的annotation
 运行`generate_coco_ann`生成COCO格式的annotation（*在构造COCO格式的annotation前，请先拆分数据集*）
 
